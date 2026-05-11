@@ -10,6 +10,7 @@ with workflow.unsafe.imports_passed_through():
         generate_resume_activity,
         fill_and_submit_activity,
         send_notification_activity,
+        update_application_status_activity,
     )
 
 
@@ -18,6 +19,11 @@ class JobApplicationWorkflow:
     """
     Main Temporal workflow for autonomous job application.
     Handles retries, long-running steps, and crash recovery.
+
+    Stepwise Telegram notifications are sent after every major phase so the
+    user always knows what is happening.  Fatal errors trigger an auto-revert
+    that marks the application as 'reverted' in the database and notifies the
+    user via Telegram.
     """
 
     @workflow.run
@@ -41,7 +47,13 @@ class JobApplicationWorkflow:
             "error": None,
         }
 
-        # Step 1: Navigate and analyze
+        # ── Step 1: Navigate and analyse the job posting ─────────────────────
+        await workflow.execute_activity(
+            send_notification_activity,
+            args=[telegram_user_id, "🔍 *Step 1/3* — Navigating to the job posting…"],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
         try:
             job_info = await workflow.execute_activity(
                 navigate_and_analyze_activity,
@@ -50,18 +62,49 @@ class JobApplicationWorkflow:
                 retry_policy=retry_policy,
             )
         except Exception as e:
+            error_msg = str(e)[:200]
+            # Auto-revert: mark the application as reverted and notify the user
             await workflow.execute_activity(
-                send_notification_activity,
-                args=[telegram_user_id, f"❌ Failed to navigate to job URL: {str(e)[:200]}"],
+                update_application_status_activity,
+                args=[application_id, "reverted", f"Navigation failed: {error_msg}"],
                 start_to_close_timeout=timedelta(seconds=30),
             )
-            result["error"] = str(e)
+            await workflow.execute_activity(
+                send_notification_activity,
+                args=[
+                    telegram_user_id,
+                    f"❌ *Step 1 failed* — Could not load the job posting.\n\n"
+                    f"Reason: `{error_msg}`\n\n"
+                    "The application has been automatically reverted. "
+                    "Please verify the URL and try again.",
+                ],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+            result["error"] = error_msg
             return result
 
         platform = job_info.get("platform", "custom")
         raw_jd = job_info.get("raw_jd", "")
+        job_title = job_info.get("job_title", "Unknown")
+        company = job_info.get("company", "Unknown")
 
-        # Step 2: Generate resume
+        await workflow.execute_activity(
+            send_notification_activity,
+            args=[
+                telegram_user_id,
+                f"✅ *Step 1/3 complete* — Job posting analysed.\n"
+                f"💼 *{job_title}* @ *{company}* ({platform})",
+            ],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
+        # ── Step 2: Generate a tailored resume ───────────────────────────────
+        await workflow.execute_activity(
+            send_notification_activity,
+            args=[telegram_user_id, "📄 *Step 2/3* — Generating your tailored résumé…"],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
         try:
             pdf_path = await workflow.execute_activity(
                 generate_resume_activity,
@@ -69,11 +112,31 @@ class JobApplicationWorkflow:
                 start_to_close_timeout=timedelta(minutes=10),
                 retry_policy=retry_policy,
             )
+            await workflow.execute_activity(
+                send_notification_activity,
+                args=[telegram_user_id, "✅ *Step 2/3 complete* — Résumé generated successfully."],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
         except Exception as e:
             workflow.logger.warning(f"Resume generation failed: {e}, continuing without resume")
             pdf_path = None
+            await workflow.execute_activity(
+                send_notification_activity,
+                args=[
+                    telegram_user_id,
+                    f"⚠️ *Step 2/3* — Résumé generation failed (`{str(e)[:100]}`). "
+                    "Continuing without a tailored résumé.",
+                ],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
 
-        # Step 3: Fill form and submit
+        # ── Step 3: Fill form and submit ─────────────────────────────────────
+        await workflow.execute_activity(
+            send_notification_activity,
+            args=[telegram_user_id, "📝 *Step 3/3* — Filling the application form…"],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
         try:
             submit_result = await workflow.execute_activity(
                 fill_and_submit_activity,
@@ -82,11 +145,49 @@ class JobApplicationWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
             result.update(submit_result)
+
+            if result.get("submitted"):
+                await workflow.execute_activity(
+                    send_notification_activity,
+                    args=[
+                        telegram_user_id,
+                        f"🎉 *Application submitted!*\n\n"
+                        f"💼 {job_title} @ {company}\n"
+                        f"🔗 {job_url[:80]}\n\n"
+                        "Check /status for full details.",
+                    ],
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
+            else:
+                error_detail = result.get("error") or "Unknown reason"
+                await workflow.execute_activity(
+                    send_notification_activity,
+                    args=[
+                        telegram_user_id,
+                        f"⚠️ *Step 3/3* — Form submission was not completed.\n"
+                        f"Reason: `{error_detail[:200]}`",
+                    ],
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
+
         except Exception as e:
-            result["error"] = str(e)
+            error_msg = str(e)[:200]
+            result["error"] = error_msg
+            # Auto-revert on fatal submission failure
+            await workflow.execute_activity(
+                update_application_status_activity,
+                args=[application_id, "reverted", f"Submission failed: {error_msg}"],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
             await workflow.execute_activity(
                 send_notification_activity,
-                args=[telegram_user_id, f"❌ Application workflow failed: {str(e)[:200]}"],
+                args=[
+                    telegram_user_id,
+                    f"❌ *Step 3 failed* — Application workflow encountered a fatal error.\n\n"
+                    f"Reason: `{error_msg}`\n\n"
+                    "The application has been automatically reverted. "
+                    "Use /status to review or send a new URL to try again.",
+                ],
                 start_to_close_timeout=timedelta(seconds=30),
             )
 

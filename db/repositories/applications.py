@@ -53,6 +53,44 @@ class ApplicationsRepository:
         )
         return list(result.scalars().all())
 
+    async def get_latest_by_user(self, user_id: UUID) -> Optional[Application]:
+        """Return the most recent application for a user, or None."""
+        result = await self.session.execute(
+            select(Application)
+            .where(Application.user_id == user_id)
+            .order_by(Application.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_audit_logs(self, application_id: UUID) -> List[AuditLog]:
+        """Return all audit-log entries for an application, ordered oldest-first."""
+        result = await self.session.execute(
+            select(AuditLog)
+            .where(AuditLog.application_id == application_id)
+            .order_by(AuditLog.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def revert(
+        self,
+        application_id: UUID,
+        reason: str = "user_requested",
+    ) -> None:
+        """Mark an application as 'reverted' and store the reason in error_message.
+
+        Only applications that are not already completed or reverted will be
+        updated, so calling this on a finished application is a no-op.
+        """
+        await self.session.execute(
+            update(Application)
+            .where(
+                Application.id == application_id,
+                Application.status.not_in(["completed", "reverted"]),
+            )
+            .values(status="reverted", error_message=reason)
+        )
+
     async def update_status(
         self,
         application_id: UUID,

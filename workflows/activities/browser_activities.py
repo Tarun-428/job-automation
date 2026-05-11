@@ -183,6 +183,31 @@ async def send_notification_activity(
     telegram_user_id: int,
     message: str,
 ) -> None:
+    """Send a Telegram message to the given user."""
     from telegram.notifications import TelegramNotifier
     notifier = TelegramNotifier()
     await notifier.send_message(telegram_user_id, message)
+
+
+@activity.defn
+async def update_application_status_activity(
+    application_id: str,
+    status: str,
+    error_message: Optional[str] = None,
+) -> None:
+    """Persist an application status change to the database.
+
+    This is used by the workflow to record auto-reverts and other
+    status transitions without coupling the workflow logic to the ORM.
+    """
+    from db.database import get_db_session
+    from db.repositories.applications import ApplicationsRepository
+    from uuid import UUID
+
+    aid = UUID(application_id)
+    async with get_db_session() as session:
+        repo = ApplicationsRepository(session)
+        if status == "reverted":
+            await repo.revert(aid, reason=error_message or "auto_reverted")
+        else:
+            await repo.update_status(aid, status=status, error_message=error_message)
