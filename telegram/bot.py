@@ -1,4 +1,5 @@
 from typing import Callable, Awaitable, Optional
+from pathlib import Path
 
 from telegram.notifications import TelegramNotifier
 from telegram.handlers.url_handler import URLHandler
@@ -8,6 +9,7 @@ from telegram.handlers.question_handler import QuestionHandler
 from db.database import get_db_session
 from db.repositories.users import UsersRepository
 from config.logging import get_logger
+from config.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -19,15 +21,20 @@ HELP_TEXT = """
 /profile — Update your profile
 /status — Check active applications
 /history — View application history
+/update — Get a detailed step-by-step progress report for your latest application
+/revert — Cancel and roll back your latest pending/running application
 /help — Show this message
 
 *To apply to a job:*
-Simply send the job application URL and I'll handle everything automatically!
+Simply send the job application URL (LinkedIn, Indeed, Greenhouse, etc.) and I'll handle everything automatically!
 
 *During application:*
 • I'll ask you questions I can't answer automatically
 • Send OTPs when requested
 • Reply `yes`/`no` to approve final submissions
+
+*LinkedIn URLs must follow this format:*
+`https://www.linkedin.com/jobs/view/<job-id>`
 """
 
 ONBOARDING_STEPS = [
@@ -43,6 +50,18 @@ ONBOARDING_STEPS = [
     ("skills", "🛠 List your top skills, comma-separated (e.g., Python, React, SQL):"),
     ("summary", "✍️ Write a brief professional summary (2-3 sentences):"),
 ]
+
+# Emoji mapping for application statuses used across multiple handlers
+STATUS_EMOJI = {
+    "completed": "✅",
+    "running": "🔄",
+    "failed": "❌",
+    "paused": "⏸",
+    "pending": "⏳",
+    "reverted": "↩️",
+    "waiting_user": "🙋",
+    "escalated": "⚠️",
+}
 
 
 class TelegramBot:
@@ -81,6 +100,10 @@ class TelegramBot:
             await self._handle_status(telegram_user_id)
         elif text.startswith("/history"):
             await self._handle_history(telegram_user_id)
+        elif text.startswith("/update"):
+            await self._handle_update(telegram_user_id)
+        elif text.startswith("/revert"):
+            await self._handle_revert(telegram_user_id)
         elif text.startswith("/help"):
             await self.notifier.send_message(telegram_user_id, HELP_TEXT)
         elif telegram_user_id in self._onboarding_state:
@@ -90,6 +113,16 @@ class TelegramBot:
                 telegram_user_id, telegram_username, text, self.workflow_trigger
             )
         else:
+            lowered = text.lower()
+            # "linkdin" is a common misspelling of "linkedin" we want to accept.
+            if "linkedin" in lowered or "linkdin" in lowered:
+                await self.notifier.send_message(
+                    telegram_user_id,
+                    "🔗 Please send the full LinkedIn job URL in this format:\n"
+                    "`https://www.linkedin.com/jobs/view/<job-id>`\n\n"
+                    "Once you send a valid link, I'll start the application.",
+                )
+                return
             # Route to escalation handler (OTP / approval / answer)
             handled = await self.otp_handler.handle(telegram_user_id, text)
             if not handled:
@@ -176,10 +209,113 @@ class TelegramBot:
 
         lines = ["📊 *Recent Applications:*\n"]
         for app in apps:
-            status_emoji = {"completed": "✅", "running": "🔄", "failed": "❌", "paused": "⏸", "pending": "⏳"}.get(app.status, "❓")
+            status_emoji = STATUS_EMOJI.get(app.status, "❓")
             lines.append(f"{status_emoji} {app.job_title or 'Unknown'} @ {app.company or 'Unknown'} — {app.status}")
 
         await self.notifier.send_message(telegram_user_id, "\n".join(lines))
 
     async def _handle_history(self, telegram_user_id: int) -> None:
         await self._handle_status(telegram_user_id)
+
+    async def _handle_update(self, telegram_user_id: int) -> None:
+        """Send the user a detailed step-by-step status for their latest application."""
+        settings = get_settings()
+        async with get_db_session() as session:
+            user_repo = UsersRepository(session)
+            user = await user_repo.get_by_telegram_id(telegram_user_id)
+            if not user:
+                await self.notifier.send_message(telegram_user_id, "No account found. Send /start first.")
+                return
+
+            from db.repositories.applications import ApplicationsRepository
+            app_repo = ApplicationsRepository(session)
+            app = await app_repo.get_latest_by_user(user.id)
+
+            if not app:
+                await self.notifier.send_message(
+                    telegram_user_id,
+                    "No applications found. Send a job URL to start!"
+                )
+                return
+
+            # Fetch audit logs for stepwise detail
+            logs = await app_repo.get_audit_logs(app.id)
+
+        status_emoji = STATUS_EMOJI.get(app.status, "❓")
+        lines = [
+            f"📋 *Application Update*\n",
+            f"🔗 URL: `{(app.job_url or '')[:80]}`",
+            f"💼 Job: {app.job_title or 'Unknown'} @ {app.company or 'Unknown'}",
+            f"🆔 Workflow: `{app.workflow_id}`",
+            f"📌 Status: {status_emoji} *{app.status}*",
+        ]
+
+        if app.error_message:
+            lines.append(f"⚠️ Note: {app.error_message}")
+
+        if settings.save_screenshots:
+            screenshot_dir = Path(settings.storage_local_path) / "screenshots" / str(user.id)
+            lines.append(f"🖼 Screenshots: `{screenshot_dir.resolve()}`")
+        else:
+            lines.append("🖼 Screenshots: disabled (set `SAVE_SCREENSHOTS=true`)")
+
+        if logs:
+            lines.append("\n*Step-by-step log:*")
+            for log in logs:
+                ts = log.created_at.strftime("%H:%M:%S") if log.created_at else "?"
+                event_data = getattr(log, "event_data", None)
+                if not isinstance(event_data, dict):
+                    event_data = {}
+                message = event_data.get("message") or log.event_type
+                lines.append(f"  `{ts}` — {message}")
+                screenshot_path = event_data.get("screenshot_path")
+                if screenshot_path:
+                    lines.append(f"     📸 `{screenshot_path}`")
+        else:
+            lines.append("\n_No detailed log entries yet._")
+
+        lines.append(
+            "\nUse /revert to cancel this application or send a new URL to start another."
+        )
+        await self.notifier.send_message(telegram_user_id, "\n".join(lines))
+
+    async def _handle_revert(self, telegram_user_id: int) -> None:
+        """Cancel and roll back the user's latest pending/running application."""
+        async with get_db_session() as session:
+            user_repo = UsersRepository(session)
+            user = await user_repo.get_by_telegram_id(telegram_user_id)
+            if not user:
+                await self.notifier.send_message(telegram_user_id, "No account found. Send /start first.")
+                return
+
+            from db.repositories.applications import ApplicationsRepository
+            app_repo = ApplicationsRepository(session)
+            app = await app_repo.get_latest_by_user(user.id)
+
+            if not app:
+                await self.notifier.send_message(
+                    telegram_user_id,
+                    "No applications found. Nothing to revert."
+                )
+                return
+
+            # Only revert if the application is still in a cancellable state
+            if app.status in ("completed", "reverted"):
+                status_emoji = STATUS_EMOJI.get(app.status, "❓")
+                await self.notifier.send_message(
+                    telegram_user_id,
+                    f"ℹ️ Your latest application is already *{app.status}* {status_emoji}.\n"
+                    "There is nothing to revert."
+                )
+                return
+
+            await app_repo.revert(app.id, reason="user_requested_via_telegram")
+
+        await self.notifier.send_message(
+            telegram_user_id,
+            f"↩️ *Application reverted.*\n\n"
+            f"💼 {app.job_title or 'Unknown'} @ {app.company or 'Unknown'}\n"
+            f"🆔 `{app.workflow_id}`\n\n"
+            "The application has been cancelled and marked as reverted. "
+            "Send a new job URL whenever you're ready to try again."
+        )

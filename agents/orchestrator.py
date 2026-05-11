@@ -24,6 +24,7 @@ from browser.screenshot import capture_screenshot
 from security.credential_store import CredentialStore
 from telegram.notifications import TelegramNotifier
 from config.logging import get_logger
+from db.audit import record_audit_log, record_screenshot
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,7 @@ class ApplicationState:
     # Validation
     validation_passed: bool = False
     validation_screenshot: str = ""
+    validation_screenshot_bytes: Optional[bytes] = None
 
     # Result
     submitted: bool = False
@@ -179,6 +181,13 @@ class OrchestratorAgent:
 
     async def _node_navigate(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "navigate"
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "navigate_start",
+            {"message": "Navigating to job posting", "job_url": state.get("job_url")},
+        )
         await self.recovery.mark_running(state["application_id"])
         await self.browser_nav.navigate_to_url(page, state["job_url"])
         await self.browser_nav.handle_popup(page)
@@ -191,10 +200,17 @@ class OrchestratorAgent:
         await self.browser_nav.smart_navigate_apply(page, state["user_id"])
 
         logger.info("navigated", url=state["job_url"], platform=platform)
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "navigate_complete",
+            {"message": "Navigation complete", "platform": platform},
+        )
         return state
 
     async def _node_check_login(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "check_login"
         screenshot_bytes, _ = await capture_screenshot(page, "check_login", str(state["user_id"]))
         is_login = await self.vision.detect_login_page(screenshot_bytes)
 
@@ -210,10 +226,17 @@ class OrchestratorAgent:
         else:
             state["is_logged_in"] = True
 
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "login_check_complete",
+            {"message": "Login check completed", "logged_in": state.get("is_logged_in")},
+        )
         return state
 
     async def _node_parse_jd(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "parse_jd"
         raw_text = await self.browser_nav.extract_page_text(page)
         parsed = await self.job_parser.parse_job_description(raw_text, state["job_url"])
 
@@ -235,9 +258,27 @@ class OrchestratorAgent:
             )
 
         logger.info("jd_parsed", title=parsed.job_title, company=parsed.company)
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "job_parsed",
+            {
+                "message": "Job description parsed",
+                "job_title": parsed.job_title,
+                "company": parsed.company,
+                "platform": state.get("platform"),
+            },
+        )
         return state
 
     async def _node_generate_resume(self, state: dict) -> dict:
+        state["current_step"] = "generate_resume"
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "resume_generation_start",
+            {"message": "Generating tailored resume"},
+        )
         parsed_job = state["parsed_job"]
         pdf_path = await self.resume_gen.generate_tailored_resume(
             user_id=state["user_id"],
@@ -246,10 +287,17 @@ class OrchestratorAgent:
         )
         state["resume_pdf_path"] = pdf_path
         logger.info("resume_generated", path=pdf_path)
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "resume_generated",
+            {"message": "Resume generated", "pdf_path": pdf_path},
+        )
         return state
 
     async def _node_fill_form(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "fill_form"
         filled = await self.form_filler.fill_all_visible_fields(
             page=page,
             user_id=state["user_id"],
@@ -258,10 +306,17 @@ class OrchestratorAgent:
         )
         state["filled_fields"] = filled
         logger.info("form_filled", fields_count=len(filled))
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "form_filled",
+            {"message": "Form fields filled", "fields_filled": len(filled)},
+        )
         return state
 
     async def _node_upload_resume(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "upload_resume"
         pdf_path = state.get("resume_pdf_path")
         if pdf_path:
             uploaded = await self.browser_nav.handle_file_upload(
@@ -271,23 +326,53 @@ class OrchestratorAgent:
                 # Try without label
                 uploaded = await self.browser_nav.handle_file_upload(page, pdf_path)
             logger.info("resume_upload_attempted", uploaded=uploaded)
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "resume_upload",
+                {
+                    "message": "Resume upload attempted",
+                    "uploaded": uploaded,
+                    "pdf_path": pdf_path,
+                },
+            )
         return state
 
     async def _node_validate(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "validate"
         result = await self.validation.validate_before_submit(
             page, state["user_id"]
         )
         state["validation_passed"] = result.passed
         state["validation_screenshot"] = result.screenshot_path
+        state["validation_screenshot_bytes"] = result.screenshot_bytes
+        await record_screenshot(
+            state.get("application_id"),
+            "pre_submit_validation",
+            result.screenshot_path,
+        )
+        await record_audit_log(
+            state.get("application_id"),
+            state.get("user_id"),
+            "validation_complete",
+            {
+                "message": "Validation complete",
+                "passed": result.passed,
+                "errors": result.errors,
+                "missing_required": result.missing_required,
+                "screenshot_path": result.screenshot_path,
+            },
+        )
         if not result.passed:
             state["error"] = f"Validation failed: {result.errors} missing: {result.missing_required}"
         return state
 
     async def _node_review_approval(self, state: dict) -> dict:
+        state["current_step"] = "review_approval"
         screenshot_path = state.get("validation_screenshot", "")
-        screenshot_bytes = None
-        if screenshot_path:
+        screenshot_bytes = state.get("validation_screenshot_bytes")
+        if screenshot_bytes is None and screenshot_path:
             try:
                 with open(screenshot_path, "rb") as f:
                     screenshot_bytes = f.read()
@@ -310,10 +395,27 @@ class OrchestratorAgent:
         if not approved:
             state["error"] = "User rejected submission"
             state["validation_passed"] = False
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "approval_rejected",
+                {"message": "User rejected submission"},
+            )
+        else:
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "approval_granted",
+                {
+                    "message": "User approved submission",
+                    "screenshot_path": screenshot_path,
+                },
+            )
         return state
 
     async def _node_submit(self, state: dict) -> dict:
         page = state["_page"]
+        state["current_step"] = "submit"
         try:
             submit_selectors = [
                 'button[type="submit"]',
@@ -333,9 +435,24 @@ class OrchestratorAgent:
             from browser.stealth import human_delay
             await human_delay(page, 1500, 2500)
 
-            screenshot_bytes, _ = await capture_screenshot(page, "post_submit", str(state["user_id"]))
+            screenshot_bytes, screenshot_path = await capture_screenshot(page, "post_submit", str(state["user_id"]))
+            await record_screenshot(
+                state.get("application_id"),
+                "post_submit",
+                screenshot_path,
+            )
             success = await self.vision.detect_success(screenshot_bytes)
             state["submitted"] = success
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "submission_checked",
+                {
+                    "message": "Submission confirmation checked",
+                    "submitted": success,
+                    "screenshot_path": screenshot_path,
+                },
+            )
 
             if success:
                 # Try to grab confirmation text
@@ -359,6 +476,12 @@ class OrchestratorAgent:
         except Exception as e:
             state["error"] = str(e)
             state["submitted"] = False
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "submission_error",
+                {"message": "Error during submission", "error": str(e)},
+            )
 
         return state
 
@@ -384,6 +507,12 @@ class OrchestratorAgent:
                 state["user_id"],
                 error,
                 step=state.get("current_step", "unknown"),
+            )
+            await record_audit_log(
+                state.get("application_id"),
+                state.get("user_id"),
+                "workflow_failed",
+                {"message": "Workflow failed", "error": error, "step": state.get("current_step")},
             )
 
         await self.notifier.send_message(

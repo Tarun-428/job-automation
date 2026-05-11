@@ -111,7 +111,7 @@ class Application(Base):
     company = Column(String(256))
     platform = Column(String(64))  # linkedin, greenhouse, lever, etc.
     status = Column(String(64), default="pending")
-    # pending | running | paused | waiting_user | completed | failed | escalated
+    # pending | running | paused | waiting_user | completed | failed | escalated | reverted
     error_message = Column(Text)
     confirmation_id = Column(String(256))
     applied_at = Column(DateTime(timezone=True))
