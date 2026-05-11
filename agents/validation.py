@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from playwright.async_api import Page
@@ -21,6 +21,7 @@ class ValidationResult:
     warnings: List[str] = field(default_factory=list)
     resume_uploaded: bool = False
     screenshot_path: str = ""
+    screenshot_bytes: Optional[bytes] = None
 
 
 class ValidationAgent:
@@ -36,6 +37,7 @@ class ValidationAgent:
             page, "pre_submit_validation", str(user_id)
         )
         result.screenshot_path = path
+        result.screenshot_bytes = screenshot_bytes
 
         # Check for visible validation errors
         error_selectors = [

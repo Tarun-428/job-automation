@@ -205,3 +205,13 @@ async def test_revert_cancels_running_application():
     mock_apps_repo.revert.assert_awaited_once()
     msg = bot.notifier.send_message.call_args[0][1]
     assert "reverted" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_linkedin_prompt_without_url():
+    bot = _make_bot()
+    await bot.handle_update(_make_update("apply on linkdin"))
+    bot.notifier.send_message.assert_awaited_once()
+    msg = bot.notifier.send_message.call_args[0][1].lower()
+    assert "linkedin" in msg
+    assert "jobs/view" in msg

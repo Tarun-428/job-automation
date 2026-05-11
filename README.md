@@ -35,6 +35,11 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
+Optional: to save screenshots captured during automation, set:
+```
+SAVE_SCREENSHOTS=true
+```
+
 ### 3. Pull Ollama Models (optional)
 
 ```bash

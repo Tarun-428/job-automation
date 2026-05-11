@@ -111,6 +111,15 @@ class TelegramBot:
                 telegram_user_id, telegram_username, text, self.workflow_trigger
             )
         else:
+            lowered = text.lower()
+            if "linkedin" in lowered or "linkdin" in lowered:
+                await self.notifier.send_message(
+                    telegram_user_id,
+                    "🔗 Please send the full LinkedIn job URL in this format:\n"
+                    "`https://www.linkedin.com/jobs/view/<job-id>`\n\n"
+                    "Once you send a valid link, I'll start the application.",
+                )
+                return
             # Route to escalation handler (OTP / approval / answer)
             handled = await self.otp_handler.handle(telegram_user_id, text)
             if not handled:

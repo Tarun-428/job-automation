@@ -59,6 +59,7 @@ class ApplicationState:
     # Validation
     validation_passed: bool = False
     validation_screenshot: str = ""
+    validation_screenshot_bytes: Optional[bytes] = None
 
     # Result
     submitted: bool = False
@@ -280,14 +281,15 @@ class OrchestratorAgent:
         )
         state["validation_passed"] = result.passed
         state["validation_screenshot"] = result.screenshot_path
+        state["validation_screenshot_bytes"] = result.screenshot_bytes
         if not result.passed:
             state["error"] = f"Validation failed: {result.errors} missing: {result.missing_required}"
         return state
 
     async def _node_review_approval(self, state: dict) -> dict:
         screenshot_path = state.get("validation_screenshot", "")
-        screenshot_bytes = None
-        if screenshot_path:
+        screenshot_bytes = state.get("validation_screenshot_bytes")
+        if screenshot_bytes is None and screenshot_path:
             try:
                 with open(screenshot_path, "rb") as f:
                     screenshot_bytes = f.read()

@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     # Storage
     storage_backend: str = "local"
     storage_local_path: str = "/app/storage"
+    # Screenshot persistence (set SAVE_SCREENSHOTS=true to store files on disk)
+    save_screenshots: bool = False
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_s3_bucket: str = "jobbot-files"
