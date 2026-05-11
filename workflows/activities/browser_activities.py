@@ -199,6 +199,8 @@ async def update_application_status_activity(
 
     This is used by the workflow to record auto-reverts and other
     status transitions without coupling the workflow logic to the ORM.
+    When status is 'reverted', the repository's revert() API is used to
+    preserve its guardrails against reverting completed records.
     """
     from db.database import get_db_session
     from db.repositories.applications import ApplicationsRepository

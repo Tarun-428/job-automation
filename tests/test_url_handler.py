@@ -45,10 +45,10 @@ def test_is_linkedin_url_false_for_other_domains():
     assert h.is_linkedin_url("https://boards.greenhouse.io/company/jobs/1") is False
 
 
-def test_is_linkedin_url_rejects_redirect_trick():
+def test_is_linkedin_url_rejects_phishing_host():
     """A URL whose path contains 'linkedin.com' but whose host is not LinkedIn."""
     h = make_handler()
-    assert h.is_linkedin_url("https://evil.com/redirect?to=linkedin.com") is False
+    assert h.is_linkedin_url("https://phishing.com/redirect?to=linkedin.com") is False
 
 
 def test_is_linkedin_url_accepts_subdomain():

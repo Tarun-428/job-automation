@@ -4,6 +4,8 @@ from typing import Optional
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
+MAX_ERROR_MESSAGE_LENGTH = 200
+
 with workflow.unsafe.imports_passed_through():
     from workflows.activities.browser_activities import (
         navigate_and_analyze_activity,
@@ -47,7 +49,7 @@ class JobApplicationWorkflow:
             "error": None,
         }
 
-        # ── Step 1: Navigate and analyse the job posting ─────────────────────
+        # ── Step 1: Navigate and analyze the job posting ─────────────────────
         await workflow.execute_activity(
             send_notification_activity,
             args=[telegram_user_id, "🔍 *Step 1/3* — Navigating to the job posting…"],
@@ -62,7 +64,7 @@ class JobApplicationWorkflow:
                 retry_policy=retry_policy,
             )
         except Exception as e:
-            error_msg = str(e)[:200]
+            error_msg = str(e)[:MAX_ERROR_MESSAGE_LENGTH]
             # Auto-revert: mark the application as reverted and notify the user
             await workflow.execute_activity(
                 update_application_status_activity,
@@ -165,13 +167,13 @@ class JobApplicationWorkflow:
                     args=[
                         telegram_user_id,
                         f"⚠️ *Step 3/3* — Form submission was not completed.\n"
-                        f"Reason: `{error_detail[:200]}`",
+                        f"Reason: `{error_detail[:MAX_ERROR_MESSAGE_LENGTH]}`",
                     ],
                     start_to_close_timeout=timedelta(seconds=30),
                 )
 
         except Exception as e:
-            error_msg = str(e)[:200]
+            error_msg = str(e)[:MAX_ERROR_MESSAGE_LENGTH]
             result["error"] = error_msg
             # Auto-revert on fatal submission failure
             await workflow.execute_activity(
