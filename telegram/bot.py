@@ -263,7 +263,9 @@ class TelegramBot:
             lines.append("\n*Step-by-step log:*")
             for log in logs:
                 ts = log.created_at.strftime("%H:%M:%S") if log.created_at else "?"
-                event_data = getattr(log, "event_data", None) or {}
+                event_data = getattr(log, "event_data", None)
+                if not isinstance(event_data, dict):
+                    event_data = {}
                 message = event_data.get("message") or log.event_type
                 lines.append(f"  `{ts}` — {message}")
                 screenshot_path = event_data.get("screenshot_path")
