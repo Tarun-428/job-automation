@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobbot-worker
+  labels:
+    app: jobbot-worker
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: jobbot-worker
+  template:
+    metadata:
+      labels:
+        app: jobbot-worker
+    spec:
+      containers:
+        - name: worker
+          image: jobbot-worker:latest
+          envFrom:
+            - secretRef:
+                name: jobbot-secrets
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "4000m"
+          volumeMounts:
+            - name: app-storage
+              mountPath: /app/storage
+          securityContext:
+            capabilities:
+              add: ["SYS_ADMIN"]  # Required for Chromium sandboxing
+      volumes:
+        - name: app-storage
+          persistentVolumeClaim:
+            claimName: jobbot-storage-pvc

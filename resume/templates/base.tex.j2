@@ -1,0 +1,71 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{parskip}
+
+\hypersetup{colorlinks=true, urlcolor=blue}
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\setlist[itemize]{leftmargin=*, topsep=2pt, itemsep=1pt}
+
+\begin{document}
+\pagestyle{empty}
+
+%% HEADER
+\begin{center}
+  {\LARGE \textbf{ {{ full_name }} }}\\[4pt]
+  {% if email %}\href{mailto:{{ email }}}{ {{ email }} }{% endif %}
+  {% if phone %} $\cdot$ {{ phone }}{% endif %}
+  {% if location %} $\cdot$ {{ location }}{% endif %}\\
+  {% if linkedin_url %}\href{ {{ linkedin_url }} }{LinkedIn}{% endif %}
+  {% if github_url %} $\cdot$ \href{ {{ github_url }} }{GitHub}{% endif %}
+  {% if portfolio_url %} $\cdot$ \href{ {{ portfolio_url }} }{Portfolio}{% endif %}
+\end{center}
+
+{% if optimized_summary %}
+\section{Summary}
+{{ optimized_summary }}
+{% endif %}
+
+{% if skill_order %}
+\section{Skills}
+{% set chunked = skill_order | batch(6) %}
+{% for chunk in chunked %}
+{{ chunk | join(' $\cdot$ ') }}\\
+{% endfor %}
+{% endif %}
+
+{% if optimized_experience %}
+\section{Experience}
+{% for exp in optimized_experience %}
+\textbf{ {{ exp.title }} } \hfill {{ exp.dates }}\\
+\textit{ {{ exp.company }} }
+\begin{itemize}
+{% for bullet in exp.bullets %}
+  \item {{ bullet }}
+{% endfor %}
+\end{itemize}
+{% endfor %}
+{% endif %}
+
+{% if education %}
+\section{Education}
+{% for edu in education %}
+\textbf{ {{ edu.degree }} } $\cdot$ {{ edu.institution }} \hfill {{ edu.year }}\\
+{% if edu.gpa %}GPA: {{ edu.gpa }}{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if certifications %}
+\section{Certifications}
+\begin{itemize}
+{% for cert in certifications %}
+  \item {{ cert }}
+{% endfor %}
+\end{itemize}
+{% endif %}
+
+\end{document}

@@ -1,0 +1,125 @@
+version: "3.9"
+
+services:
+  # ─── Infrastructure ────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: jobbot
+      POSTGRES_USER: jobbot
+      POSTGRES_PASSWORD: jobbot_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:1.23.0
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=jobbot
+      - POSTGRES_PWD=jobbot_password
+      - POSTGRES_SEEDS=postgres
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8080:8080"
+    depends_on:
+      - temporal
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ─── Application ───────────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    env_file: ../.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobbot:jobbot_password@postgres:5432/jobbot
+      DATABASE_URL_SYNC: postgresql://jobbot:jobbot_password@postgres:5432/jobbot
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_HOST: temporal:7233
+      OLLAMA_HOST: http://ollama:11434
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    env_file: ../.env
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobbot:jobbot_password@postgres:5432/jobbot
+      DATABASE_URL_SYNC: postgresql://jobbot:jobbot_password@postgres:5432/jobbot
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_HOST: temporal:7233
+      OLLAMA_HOST: http://ollama:11434
+    deploy:
+      replicas: 2  # Multiple workers for parallelism
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_models:
+  app_storage:

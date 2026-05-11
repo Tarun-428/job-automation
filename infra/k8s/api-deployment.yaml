@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobbot-api
+  labels:
+    app: jobbot-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jobbot-api
+  template:
+    metadata:
+      labels:
+        app: jobbot-api
+    spec:
+      containers:
+        - name: api
+          image: jobbot-api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: jobbot-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: jobbot-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: jobbot-secrets
+                  key: REDIS_URL
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: app-storage
+              mountPath: /app/storage
+      volumes:
+        - name: app-storage
+          persistentVolumeClaim:
+            claimName: jobbot-storage-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobbot-api-service
+spec:
+  selector:
+    app: jobbot-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: LoadBalancer
