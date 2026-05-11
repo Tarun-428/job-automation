@@ -92,7 +92,7 @@ class JobApplicationWorkflow:
             send_notification_activity,
             args=[
                 telegram_user_id,
-                f"✅ *Step 1/3 complete* — Job posting analysed.\n"
+                f"✅ *Step 1/3 complete* — Job posting analyzed.\n"
                 f"💼 *{job_title}* @ *{company}* ({platform})",
             ],
             start_to_close_timeout=timedelta(seconds=30),
@@ -101,7 +101,7 @@ class JobApplicationWorkflow:
         # ── Step 2: Generate a tailored resume ───────────────────────────────
         await workflow.execute_activity(
             send_notification_activity,
-            args=[telegram_user_id, "📄 *Step 2/3* — Generating your tailored résumé…"],
+            args=[telegram_user_id, "📄 *Step 2/3* — Generating your tailored resume…"],
             start_to_close_timeout=timedelta(seconds=30),
         )
 
@@ -114,7 +114,7 @@ class JobApplicationWorkflow:
             )
             await workflow.execute_activity(
                 send_notification_activity,
-                args=[telegram_user_id, "✅ *Step 2/3 complete* — Résumé generated successfully."],
+                args=[telegram_user_id, "✅ *Step 2/3 complete* — Resume generated successfully."],
                 start_to_close_timeout=timedelta(seconds=30),
             )
         except Exception as e:
@@ -124,8 +124,8 @@ class JobApplicationWorkflow:
                 send_notification_activity,
                 args=[
                     telegram_user_id,
-                    f"⚠️ *Step 2/3* — Résumé generation failed (`{str(e)[:100]}`). "
-                    "Continuing without a tailored résumé.",
+                    f"⚠️ *Step 2/3* — Resume generation failed (`{str(e)[:100]}`). "
+                    "Continuing without a tailored resume.",
                 ],
                 start_to_close_timeout=timedelta(seconds=30),
             )

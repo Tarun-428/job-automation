@@ -1,6 +1,7 @@
 import re
 import uuid
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -32,8 +33,17 @@ class URLHandler:
         return match.group(0) if match else None
 
     def is_linkedin_url(self, url: str) -> bool:
-        """Return True when the URL looks like a LinkedIn domain URL."""
-        return "linkedin.com" in url.lower()
+        """Return True when the URL's host is the LinkedIn domain.
+
+        Uses ``urllib.parse`` to inspect the hostname rather than a simple
+        substring check, which would incorrectly match URLs such as
+        ``https://evil.com/redirect?to=linkedin.com``.
+        """
+        try:
+            host = urlparse(url).hostname or ""
+            return host == "linkedin.com" or host.endswith(".linkedin.com")
+        except Exception:
+            return False
 
     def is_valid_linkedin_job_url(self, url: str) -> bool:
         """Return True only for proper LinkedIn job-posting URLs.
