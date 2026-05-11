@@ -7,6 +7,14 @@ def configure_logging() -> None:
     settings = get_settings()
 
     log_level = logging.DEBUG if settings.debug else logging.INFO
+    log_format = settings.log_format.lower()
+    use_pretty = log_format in {"pretty", "console", "text"}
+
+    renderer = (
+        structlog.dev.ConsoleRenderer()
+        if use_pretty
+        else structlog.processors.JSONRenderer()
+    )
 
     structlog.configure(
         processors=[
@@ -16,7 +24,7 @@ def configure_logging() -> None:
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer(),
+            renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,

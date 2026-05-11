@@ -38,6 +38,12 @@ cp .env.example .env
 Optional: to save screenshots captured during automation, set:
 ```
 SAVE_SCREENSHOTS=true
+STORAGE_LOCAL_PATH=storage   # screenshots in ./storage/screenshots/<user-id>
+```
+
+Optional: for human-readable logs instead of JSON:
+```
+LOG_FORMAT=pretty
 ```
 
 ### 3. Pull Ollama Models (optional)

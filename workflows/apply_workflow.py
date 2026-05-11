@@ -59,7 +59,7 @@ class JobApplicationWorkflow:
         try:
             job_info = await workflow.execute_activity(
                 navigate_and_analyze_activity,
-                args=[user_id, job_url, telegram_user_id],
+                args=[user_id, job_url, telegram_user_id, application_id],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=retry_policy,
             )
@@ -89,6 +89,20 @@ class JobApplicationWorkflow:
         raw_jd = job_info.get("raw_jd", "")
         job_title = job_info.get("job_title", "Unknown")
         company = job_info.get("company", "Unknown")
+
+        await workflow.execute_activity(
+            update_application_status_activity,
+            args=[
+                application_id,
+                "running",
+                None,
+                job_title,
+                company,
+                platform,
+                None,
+            ],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
 
         await workflow.execute_activity(
             send_notification_activity,
@@ -150,6 +164,19 @@ class JobApplicationWorkflow:
 
             if result.get("submitted"):
                 await workflow.execute_activity(
+                    update_application_status_activity,
+                    args=[
+                        application_id,
+                        "completed",
+                        None,
+                        job_title,
+                        company,
+                        platform,
+                        result.get("confirmation_id"),
+                    ],
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
+                await workflow.execute_activity(
                     send_notification_activity,
                     args=[
                         telegram_user_id,
@@ -162,6 +189,19 @@ class JobApplicationWorkflow:
                 )
             else:
                 error_detail = result.get("error") or "Unknown reason"
+                await workflow.execute_activity(
+                    update_application_status_activity,
+                    args=[
+                        application_id,
+                        "failed",
+                        error_detail[:MAX_ERROR_NOTIFICATION_LENGTH],
+                        job_title,
+                        company,
+                        platform,
+                        None,
+                    ],
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
                 await workflow.execute_activity(
                     send_notification_activity,
                     args=[

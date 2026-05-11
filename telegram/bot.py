@@ -1,4 +1,5 @@
 from typing import Callable, Awaitable, Optional
+from pathlib import Path
 
 from telegram.notifications import TelegramNotifier
 from telegram.handlers.url_handler import URLHandler
@@ -8,6 +9,7 @@ from telegram.handlers.question_handler import QuestionHandler
 from db.database import get_db_session
 from db.repositories.users import UsersRepository
 from config.logging import get_logger
+from config.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -217,6 +219,7 @@ class TelegramBot:
 
     async def _handle_update(self, telegram_user_id: int) -> None:
         """Send the user a detailed step-by-step status for their latest application."""
+        settings = get_settings()
         async with get_db_session() as session:
             user_repo = UsersRepository(session)
             user = await user_repo.get_by_telegram_id(telegram_user_id)
@@ -250,11 +253,22 @@ class TelegramBot:
         if app.error_message:
             lines.append(f"⚠️ Note: {app.error_message}")
 
+        if settings.save_screenshots:
+            screenshot_dir = Path(settings.storage_local_path) / "screenshots" / str(user.id)
+            lines.append(f"🖼 Screenshots: `{screenshot_dir.resolve()}`")
+        else:
+            lines.append("🖼 Screenshots: disabled (set `SAVE_SCREENSHOTS=true`)")
+
         if logs:
             lines.append("\n*Step-by-step log:*")
             for log in logs:
                 ts = log.created_at.strftime("%H:%M:%S") if log.created_at else "?"
-                lines.append(f"  `{ts}` — {log.event_type}")
+                event_data = getattr(log, "event_data", None) or {}
+                message = event_data.get("message") or log.event_type
+                lines.append(f"  `{ts}` — {message}")
+                screenshot_path = event_data.get("screenshot_path")
+                if screenshot_path:
+                    lines.append(f"     📸 `{screenshot_path}`")
         else:
             lines.append("\n_No detailed log entries yet._")
 

@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Storage
     storage_backend: str = "local"
-    storage_local_path: str = "/app/storage"
+    storage_local_path: str = "storage"
     # Screenshot persistence (set SAVE_SCREENSHOTS=true to store files on disk)
     save_screenshots: bool = False
     aws_access_key_id: str = ""
@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     browser_headless: bool = True
     browser_timeout: int = 30000
     browser_stealth: bool = True
+
+    # Logging
+    log_format: str = "json"
 
     # Resume
     latex_engine: str = "tectonic"
