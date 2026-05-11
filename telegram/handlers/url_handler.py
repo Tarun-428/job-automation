@@ -21,6 +21,7 @@ LINKEDIN_JOB_RE = re.compile(
     r"https?://(www\.)?linkedin\.com/jobs/view/\d+",
     re.IGNORECASE,
 )
+DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; JobBot/1.0)"
 
 
 class URLHandler:
@@ -62,7 +63,7 @@ class URLHandler:
             async with httpx.AsyncClient(
                 timeout=timeout,
                 follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; JobBot/1.0)"},
+                headers={"User-Agent": DEFAULT_USER_AGENT},
             ) as client:
                 response = await client.head(url)
                 # Accept redirects (3xx) and success (2xx); reject 4xx/5xx

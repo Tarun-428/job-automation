@@ -6,7 +6,7 @@ from browser.screenshot import capture_screenshot, capture_full_page_screenshot
 
 
 class DummyPage:
-    async def screenshot(self, full_page: bool, type: str):
+    async def screenshot(self, full_page: bool, **kwargs):
         return b"image-bytes"
 
 

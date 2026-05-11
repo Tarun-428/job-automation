@@ -7,6 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from db.models import Application, AIAnswer, AuditLog, Screenshot
 
+NON_REVERTIBLE_STATUSES = ["completed", "reverted"]
+
 
 class ApplicationsRepository:
     def __init__(self, session: AsyncSession):
@@ -86,7 +88,7 @@ class ApplicationsRepository:
             update(Application)
             .where(
                 Application.id == application_id,
-                Application.status.not_in(["completed", "reverted"]),
+                Application.status.not_in(NON_REVERTIBLE_STATUSES),
             )
             .values(status="reverted", error_message=reason)
         )

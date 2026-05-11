@@ -112,7 +112,7 @@ class TelegramBot:
             )
         else:
             lowered = text.lower()
-            # "linkdin" is a common misspelling we want to accept.
+            # "linkdin" is a common misspelling of "linkedin" we want to accept.
             if "linkedin" in lowered or "linkdin" in lowered:
                 await self.notifier.send_message(
                     telegram_user_id,
